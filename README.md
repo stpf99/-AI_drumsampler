@@ -1,6 +1,6 @@
 drum sample autogeneration
 
-
+v2 drum-sampler-app_out2.py
 <img width="964" alt="drums-v2" src="https://github.com/stpf99/-AI_drumsampler/blob/753b1f1f438ab0643b7f7ce4e2b72a6775fba024/v2.png">
 
 
