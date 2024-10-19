@@ -6,6 +6,7 @@ import pygame
 import json
 import os
 from midiutil import MIDIFile
+import statistics
 
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib, Gdk
@@ -56,16 +57,18 @@ class DrumSamplerApp(Gtk.Window):
 
         self.loop_playing = False
         self.play_thread = None
-        self.bpm = 120  # Default BPM
-        self.create_bpm_controls()
+        self.absolute_bpm = 120  # Default absolute BPM
+        self.dynamic_bpm_list = []
+        self.current_bpm_index = 0
+        self.steps_per_bpm = 4  # Liczba kroków przed zmianą BPM
 
         # Add CSS for circular buttons
         self.add_css()
 
-        # Add pattern length control
+        # Add controls
+        self.create_bpm_controls()
         self.create_pattern_length_control()
         self.create_instrument_randomization_controls()
-        # Add dynamic BPM control
         self.create_dynamic_bpm_control()
         self.create_preset_selection()
 
@@ -128,6 +131,16 @@ class DrumSamplerApp(Gtk.Window):
             self.generate_hard_techno()
         self.update_buttons()
 
+    def apply_preset(self, widget):
+        preset = self.preset_combo.get_active_text()
+        if preset == "Basic Techno":
+            self.generate_basic_techno()
+        elif preset == "Minimal Techno":
+            self.generate_minimal_techno()
+        elif preset == "Hard Techno":
+            self.generate_hard_techno()
+        self.update_buttons()
+
     def generate_basic_techno(self):
         pattern_length = int(self.length_spinbutton.get_value())
         for i in range(pattern_length):
@@ -151,6 +164,12 @@ class DrumSamplerApp(Gtk.Window):
             self.patterns['Werbel'][i] = 1 if i % 8 == 4 or i % 8 == 6 else 0
             self.patterns['Talerz'][i] = 1 if i % 4 == 0 else 0
             self.patterns['TomTom'][i] = 1 if i % 8 == 7 else 0
+
+    def update_buttons(self):
+        pattern_length = int(self.length_spinbutton.get_value())
+        for inst in self.instruments:
+            for i in range(pattern_length):
+                self.buttons[inst][i].set_active(bool(self.patterns[inst][i]))
 
     def create_toolbar(self):
         toolbar = Gtk.Toolbar()
@@ -195,12 +214,13 @@ class DrumSamplerApp(Gtk.Window):
         bpm_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.main_box.pack_start(bpm_box, False, False, 0)
 
-        bpm_label = Gtk.Label(label="BPM:")
+        bpm_label = Gtk.Label(label="Absolute BPM:")
         bpm_box.pack_start(bpm_label, False, False, 0)
 
         self.bpm_entry = Gtk.Entry()
-        self.bpm_entry.set_text(str(self.bpm))
+        self.bpm_entry.set_text(str(self.absolute_bpm))
         self.bpm_entry.set_width_chars(4)
+        self.bpm_entry.connect("changed", self.on_absolute_bpm_changed)
         bpm_box.pack_start(self.bpm_entry, False, False, 0)
 
         bpm_up_button = Gtk.Button()
@@ -215,13 +235,22 @@ class DrumSamplerApp(Gtk.Window):
         bpm_down_button.connect("clicked", self.bpm_step_down)
         bpm_box.pack_start(bpm_down_button, False, False, 0)
 
+    def on_absolute_bpm_changed(self, widget):
+        try:
+            self.absolute_bpm = int(self.bpm_entry.get_text())
+            self.update_dynamic_bpm()
+        except ValueError:
+            print("Invalid BPM input. Please enter an integer.")
+
     def bpm_step_up(self, widget):
-        self.bpm = min(300, self.bpm + 5)  # Limit maximum BPM to 300
-        self.bpm_entry.set_text(str(self.bpm))
+        self.absolute_bpm = min(300, self.absolute_bpm + 5)  # Limit maximum BPM to 300
+        self.bpm_entry.set_text(str(self.absolute_bpm))
+        self.update_dynamic_bpm()
 
     def bpm_step_down(self, widget):
-        self.bpm = max(60, self.bpm - 5)  # Limit minimum BPM to 60
-        self.bpm_entry.set_text(str(self.bpm))
+        self.absolute_bpm = max(60, self.absolute_bpm - 5)  # Limit minimum BPM to 60
+        self.bpm_entry.set_text(str(self.absolute_bpm))
+        self.update_dynamic_bpm()
 
     def randomize_pattern(self, widget):
         pattern_length = int(self.length_spinbutton.get_value())
@@ -238,12 +267,6 @@ class DrumSamplerApp(Gtk.Window):
 
         # Call instrument randomization after generating the base pattern
         self.randomize_instruments(None)
-
-    def update_buttons(self):
-        pattern_length = int(self.length_spinbutton.get_value())
-        for inst in self.instruments:
-            for i in range(pattern_length):
-                self.buttons[inst][i].set_active(bool(self.patterns[inst][i]))
 
     def load_samples(self, widget):
         for inst in self.instruments:
@@ -429,11 +452,11 @@ class DrumSamplerApp(Gtk.Window):
         dynamic_bpm_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.main_box.pack_start(dynamic_bpm_box, False, False, 0)
 
-        dynamic_bpm_label = Gtk.Label(label="Dynamic BPM:")
+        dynamic_bpm_label = Gtk.Label(label="Dynamic BPM (%):")
         dynamic_bpm_box.pack_start(dynamic_bpm_label, False, False, 0)
 
         self.dynamic_bpm_entry = Gtk.Entry()
-        self.dynamic_bpm_entry.set_text("120,140,100,130")
+        self.dynamic_bpm_entry.set_text("100,110,90,105")
         self.dynamic_bpm_entry.set_width_chars(20)
         dynamic_bpm_box.pack_start(self.dynamic_bpm_entry, False, False, 0)
 
@@ -441,60 +464,74 @@ class DrumSamplerApp(Gtk.Window):
         apply_button.connect("clicked", self.apply_dynamic_bpm)
         dynamic_bpm_box.pack_start(apply_button, False, False, 0)
 
-        self.dynamic_bpm_list = []
-        self.current_bpm_index = 0
-
     def apply_dynamic_bpm(self, widget):
         bpm_string = self.dynamic_bpm_entry.get_text()
         try:
-            self.dynamic_bpm_list = [int(bpm.strip()) for bpm in bpm_string.split(',')]
+            percentages = [float(bpm.strip()) for bpm in bpm_string.split(',')]
+            self.dynamic_bpm_list = [self.absolute_bpm * (p / 100) for p in percentages]
             self.current_bpm_index = 0
             print(f"Applied dynamic BPM: {self.dynamic_bpm_list}")
         except ValueError:
-            print("Invalid BPM input. Please enter comma-separated integers.")
+            print("Invalid BPM input. Please enter comma-separated numbers.")
+
+    def update_dynamic_bpm(self):
+        if self.dynamic_bpm_list:
+            percentages = [float(bpm.strip()) for bpm in self.dynamic_bpm_entry.get_text().split(',')]
+            self.dynamic_bpm_list = [self.absolute_bpm * (p / 100) for p in percentages]
+            print(f"Updated dynamic BPM: {self.dynamic_bpm_list}")
 
     def get_next_bpm(self):
         if not self.dynamic_bpm_list:
-            return self.bpm
+            return self.absolute_bpm
 
         current_bpm = self.dynamic_bpm_list[self.current_bpm_index]
-        self.current_bpm_index = (self.current_bpm_index + 1) % len(self.dynamic_bpm_list)
         return current_bpm
+
+    def advance_bpm(self):
+        if self.dynamic_bpm_list:
+            self.current_bpm_index = (self.current_bpm_index + 1) % len(self.dynamic_bpm_list)
 
     def loop_play(self):
         pattern_length = int(self.length_spinbutton.get_value())
-        step_duration = 60 / self.bpm / 4  # Duration of one step at the base BPM
+        step_counter = 0
 
         while self.loop_playing:
-            for step in range(pattern_length):
-                start_time = time.time()
+            current_bpm = self.get_next_bpm()
 
-                current_bpm = self.get_next_bpm()
+            for _ in range(self.steps_per_bpm):
+                if step_counter >= pattern_length:
+                    step_counter = 0
+
+                start_time = time.time()
                 step_duration = 60 / current_bpm / 4
 
                 for inst in self.instruments:
-                    if self.patterns[inst][step] == 1 and inst in self.samples:
+                    if self.patterns[inst][step_counter] == 1 and inst in self.samples:
                         pygame.mixer.Sound(self.samples[inst]).play()
-                        GLib.idle_add(self.blink_button, inst, step)
+                        GLib.idle_add(self.blink_button, inst, step_counter)
 
                 elapsed_time = time.time() - start_time
                 sleep_time = max(0, step_duration - elapsed_time)
                 time.sleep(sleep_time)
 
+                step_counter += 1
+
+            self.advance_bpm()
 
     def export_to_midi(self, widget):
         midi = MIDIFile(1)
         track = 0
         time = 0
         midi.addTrackName(track, time, "Drum Pattern")
-        midi.addTempo(track, time, self.bpm)
+        midi.addTempo(track, time, self.absolute_bpm)
 
         pattern_length = int(self.length_spinbutton.get_value())
         for step in range(pattern_length):
+            current_bpm = self.get_next_bpm()
             for inst in self.instruments:
                 if self.patterns[inst][step] == 1:
                     midi.addNote(track, 9, self.midi_notes[inst], time, 0.25, 100)  # Channel 9 is for drums
-            time += 0.25
+            time += 60 / current_bpm / 4  # Adjust time based on current BPM
 
         file_dialog = Gtk.FileChooserDialog(
             title="Export MIDI",
@@ -509,8 +546,6 @@ class DrumSamplerApp(Gtk.Window):
                 midi.writeFile(output_file)
             print(f"MIDI file exported to: {filename}")
         file_dialog.destroy()
-
-
 
 win = DrumSamplerApp()
 win.connect("destroy", Gtk.main_quit)
