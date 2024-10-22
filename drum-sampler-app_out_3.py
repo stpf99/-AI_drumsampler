@@ -376,9 +376,10 @@ class DrumSamplerApp(Gtk.Window):
 
             self.patterns = project_data["patterns"]
             self.samples = project_data["samples"]
-            self.bpm = project_data.get("bpm", 120)  # Default to 120 if not found
-            self.bpm_entry.set_text(str(self.bpm))
-
+            bpm_entry = project_data.get("absolute_bpm", 120)  # Default to 120 if not found
+            dynamic_bpm_list = project_data.get("dynamic_bpm_list", 120)  # Default to 120 if not found
+            self.bpm_entry.set_text(str(self.absolute_bpm))
+            self.dynamic_bpm_entry.set_text(str(self.dynamic_bpm_list))
             self.update_buttons()
             print(f"Projekt wczytany z: {filename}")
 
@@ -523,7 +524,8 @@ class DrumSamplerApp(Gtk.Window):
             project_data = {
                 "patterns": self.patterns,
                 "samples": self.samples,
-                "bpm": self.bpm
+                "absolute_bpm": self.absolute_bpm,
+                "dynamic_bpm_list": self.dynamic_bpm_list
             }
 
             with open(filename, 'w') as f:
