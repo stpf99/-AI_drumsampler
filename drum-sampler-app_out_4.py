@@ -37,7 +37,7 @@ class DrumSamplerApp(Gtk.Window):
 
         self.instruments = ['Talerz', 'Stopa', 'Werbel', 'TomTom']
         self.colors = ['red', 'green', 'blue', 'orange']
-        self.patterns = {inst: [0] * 8 for inst in self.instruments}
+        self.patterns = {inst: [0] * 16 for inst in self.instruments}
         self.samples = {}
         self.buttons = {}
         # Inside the __init__ method of DrumSamplerApp
@@ -48,7 +48,7 @@ class DrumSamplerApp(Gtk.Window):
         self.midi_notes = {'Talerz': 49, 'Stopa': 36, 'Werbel': 38, 'TomTom': 45}
 
         # Add numbers from 1 to 16 above the pattern
-        for step in range(8):
+        for step in range(16):
             label = Gtk.Label(label=str(step + 1))
             self.grid.attach(label, step + 1, 0, 1, 1)
 
@@ -1012,10 +1012,10 @@ class DrumSamplerApp(Gtk.Window):
         Parse the AI-generated pattern text and apply it to the drum machine.
 
         Expected format from AI:
-        Stopa: 1 0 1 0 1 0 1 0
-        Werbel: 0 0 0 1 0 0 0 1
-        Talerz: 1 1 0 0 1 1 0 0
-        TomTom: 0 0 0 0 1 0 1 0
+        Stopa: 1 0 1 0 1 0 1 0 0 0 0 0 1 0 1 0
+        Werbel: 0 0 0 1 0 0 0 1 0 0 0 0 1 0 1 0
+        Talerz: 1 1 0 0 1 1 0 0 0 0 0 0 1 0 1 0
+        TomTom: 0 0 0 0 1 0 1 0 0 0 0 0 1 0 1 0
         """
         # Split the text into lines for each instrument's pattern
         lines = generated_text.strip().split("\n")
