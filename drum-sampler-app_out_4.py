@@ -37,7 +37,7 @@ class DrumSamplerApp(Gtk.Window):
 
         self.instruments = ['Talerz', 'Stopa', 'Werbel', 'TomTom']
         self.colors = ['red', 'green', 'blue', 'orange']
-        self.patterns = {inst: [0] * 16 for inst in self.instruments}
+        self.patterns = {inst: [0] * 8 for inst in self.instruments}
         self.samples = {}
         self.buttons = {}
         # Inside the __init__ method of DrumSamplerApp
@@ -48,7 +48,7 @@ class DrumSamplerApp(Gtk.Window):
         self.midi_notes = {'Talerz': 49, 'Stopa': 36, 'Werbel': 38, 'TomTom': 45}
 
         # Add numbers from 1 to 16 above the pattern
-        for step in range(16):
+        for step in range(8):
             label = Gtk.Label(label=str(step + 1))
             self.grid.attach(label, step + 1, 0, 1, 1)
 
@@ -57,7 +57,7 @@ class DrumSamplerApp(Gtk.Window):
             self.grid.attach(label, 0, idx + 1, 1, 1)
 
             self.buttons[instrument] = []
-            for step in range(16):
+            for step in range(8):
                 button = Gtk.ToggleButton()
                 button.set_size_request(30, 30)
                 context = button.get_style_context()
