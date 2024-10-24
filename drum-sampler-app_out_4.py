@@ -16,8 +16,7 @@ from gi.repository import Gtk, GLib, Gdk
 import warnings
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 import sqlite3
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
-import torch
+import requests
 
 class DrumSamplerApp(Gtk.Window):
     def __init__(self):
@@ -41,7 +40,9 @@ class DrumSamplerApp(Gtk.Window):
         self.patterns = {inst: [0] * 16 for inst in self.instruments}
         self.samples = {}
         self.buttons = {}
+        # Inside the __init__ method of DrumSamplerApp
         self.effects = {inst: {'volume': 0, 'pitch': 0, 'echo': 0, 'reverb': 0, 'distortion': 0, 'pan': 0} for inst in self.instruments}
+
 
         # MIDI note mapping for instruments
         self.midi_notes = {'Talerz': 49, 'Stopa': 36, 'Werbel': 38, 'TomTom': 45}
@@ -83,11 +84,6 @@ class DrumSamplerApp(Gtk.Window):
         self.create_dynamic_bpm_control()
         self.create_preset_selection()
         self.create_effect_controls()
-
-        # Create a SpinButton for number of steps
-        self.length_spinbutton = Gtk.SpinButton.new_with_range(1, 32, 1)  # Range 1-32 steps
-        self.length_spinbutton.set_value(8)  # Default value
-        self.main_box.pack_start(self.length_spinbutton, False, False, 0)
 
 
     def add_css(self):
@@ -212,14 +208,10 @@ class DrumSamplerApp(Gtk.Window):
             self.patterns['TomTom'][i] = 1 if i % 8 == 7 else 0
 
     def update_buttons(self):
-        """
-        Update the toggle buttons based on the current patterns.
-        """
-        for inst, buttons in self.buttons.items():
-            for step, button in enumerate(buttons):
-                # Update button state based on the current pattern
-                button.set_active(self.patterns[inst][step] == 1)  # Set the button active if the pattern step is 1
-
+        pattern_length = int(self.length_spinbutton.get_value())
+        for inst in self.instruments:
+            for i in range(pattern_length):
+                self.buttons[inst][i].set_active(bool(self.patterns[inst][i]))
 
     def create_toolbar(self):
         toolbar = Gtk.Toolbar()
@@ -994,169 +986,122 @@ class DrumSamplerApp(Gtk.Window):
             time += 60 / current_bpm / 4
 
     # Adding AI Composer method
-    def generate_ai_pattern(self, widget):
-        """Generate and apply an AI-created drum pattern based on selected genre."""
-        try:
-            genre = self.genre_entry.get_text()
-            if not genre:
-                raise ValueError("Genre cannot be empty")
-
-            pattern_text = self.ai_composer.generate_pattern(genre, 16)
-            self.apply_generated_pattern(pattern_text)
-        except Exception as e:
-            print(f"Error generating pattern: {str(e)}")
-            # Here you might want to add GUI error handling
-
     def apply_generated_pattern(self, generated_text):
-        """Apply the generated pattern to the drum machine."""
-        try:
-            valid_patterns = self.validate_generated_pattern(generated_text)
-            if not valid_patterns:
-                raise ValueError("No valid patterns were generated")
+        """
+        Parse the AI-generated pattern text and apply it to the drum machine.
+        """
+        print(f"Parsing generated text: {generated_text}")  # Debugging
 
-            # Reset all patterns to zeros
-            self.patterns = {inst: [0] * 16 for inst in self.instruments}
+        # Initialize patterns with zeros
+        pattern_length = int(self.length_spinbutton.get_value())
+        for inst in self.instruments:
+            self.patterns[inst] = [0] * pattern_length
 
-            # Apply validated patterns
-            for inst, pattern in valid_patterns.items():
-                if inst in self.patterns:
-                    self.patterns[inst] = pattern[:16]  # Ensure 16 steps
-
-            self.update_buttons()
-        except Exception as e:
-            print(f"Error applying pattern: {str(e)}")
-
-    def validate_generated_pattern(self, generated_text):
-        """Validate and parse the generated pattern text into usable drum patterns."""
-        EXPECTED_STEPS = 16
-        VALID_INSTRUMENTS = {'Stopa', 'Werbel', 'Talerz', 'TomTom'}
-        valid_patterns = {}
-
-        if not generated_text:
-            return valid_patterns
-
-        lines = generated_text.strip().split("\n")
+        # Process only the lines containing instrument patterns
+        lines = generated_text.split('\n')
         for line in lines:
-            try:
-                # Skip empty lines
-                if not line.strip():
-                    continue
+            line = line.strip()
+            if not line:  # Skip empty lines
+                continue
 
-                # Parse instrument and pattern
-                parts = line.split(":")
+            try:
+                # Split line into instrument name and pattern
+                parts = line.split(':')
                 if len(parts) != 2:
-                    print(f"Invalid line format: {line}")
                     continue
 
                 instrument_name = parts[0].strip()
-                if instrument_name not in VALID_INSTRUMENTS:
-                    print(f"Unknown instrument: {instrument_name}")
+                pattern_str = parts[1].strip()
+
+                # Skip if this isn't one of our instruments
+                if instrument_name not in self.instruments:
                     continue
 
-                # Convert pattern string to integers
-                pattern_str = parts[1].strip()
-                steps = []
-                for step in pattern_str.split():
-                    value = int(step)
-                    if value not in (0, 1):
-                        raise ValueError(f"Invalid step value: {value}")
-                    steps.append(value)
+                # Convert pattern string to list of integers
+                pattern = []
+                for digit in pattern_str.split():
+                    if digit in ['0', '1']:
+                        pattern.append(int(digit))
 
-                # Validate pattern length
-                if len(steps) != EXPECTED_STEPS:
-                    print(f"Wrong pattern length for {instrument_name}: {len(steps)}")
-                    # Pad or truncate to correct length
-                    if len(steps) < EXPECTED_STEPS:
-                        steps.extend([0] * (EXPECTED_STEPS - len(steps)))
-                    else:
-                        steps = steps[:EXPECTED_STEPS]
+                # Ensure pattern matches expected length
+                if pattern:
+                    pattern = pattern[:pattern_length]  # Truncate if too long
+                    while len(pattern) < pattern_length:  # Extend if too short
+                        pattern.append(0)
 
-                valid_patterns[instrument_name] = steps
+                    # Apply the pattern
+                    self.patterns[instrument_name] = pattern
 
-            except (ValueError, IndexError) as e:
-                print(f"Error processing line '{line}': {str(e)}")
+            except Exception as e:
+                print(f"Error processing line '{line}': {e}")
                 continue
 
-        return valid_patterns
+        # Update the UI
+        self.update_buttons()
+
+    def generate_ai_pattern(self, widget):
+        genre = self.genre_entry.get_text()
+
+        # Check database for existing pattern
+        self.cursor.execute("SELECT logic FROM patterns WHERE genre=?", (genre,))
+        row = self.cursor.fetchone()
+
+        pattern_logic = None
+        if row:
+            pattern_logic = row[0]
+            print(f"Found saved pattern for {genre}")
+
+        if not pattern_logic:
+            print(f"Generating new pattern for {genre}")
+            pattern_logic = self.ai_composer.generate_pattern(genre)
+            if pattern_logic:  # Save only if we got a valid pattern
+                self.cursor.execute("INSERT INTO patterns (genre, logic) VALUES (?, ?)",
+                                  (genre, pattern_logic))
+                self.conn.commit()
+
+        if pattern_logic:
+            self.apply_generated_pattern(pattern_logic)
+        else:
+            print("Failed to generate or retrieve pattern")
+
 
 class AIComposer:
     def __init__(self):
-        """Initialize the AI Composer with GPT-2 model."""
-        try:
-            self.model_name = "gpt2"
-            self.tokenizer = GPT2Tokenizer.from_pretrained(self.model_name)
-            self.model = GPT2LMHeadModel.from_pretrained(self.model_name)
-            self.model.eval()  # Set to evaluation mode
-        except Exception as e:
-            raise RuntimeError(f"Failed to initialize AI Composer: {str(e)}")
+        self.api_url = "http://localhost:11434/api/generate"
+        self.model = "llama3.2"
 
-    def generate_pattern(self, genre="Rock", steps=16):
-        """Generate a drum pattern for the specified genre."""
-        if not isinstance(steps, int) or steps <= 0:
-            raise ValueError("Steps must be a positive integer")
+    def generate_pattern(self, genre="Disco", steps=16):
+        prompt = f"Generate a {steps}-step drum pattern for {genre} music. For each instrument provide only numbers (0 or 1) separated by spaces. Format:\nStopa: 1 0 1 0...\nWerbel: 0 1 0 1...\nTalerz: 1 1 0 0...\nTomTom: 0 0 1 1..."
 
-        prompt = self._create_prompt(genre, steps)
+        data = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False
+        }
 
         try:
-            # Tokenize input
-            inputs = self.tokenizer.encode(prompt, return_tensors="pt")
-            attention_mask = torch.ones(inputs.shape, dtype=torch.long)
+            response = requests.post(self.api_url, json=data)
+            response.raise_for_status()
 
-            # Generate pattern with improved parameters
-            outputs = self.model.generate(
-                inputs,
-                attention_mask=attention_mask,
-                max_length=400,  # Increased for more complete patterns
-                num_return_sequences=1,
-                do_sample=True,
-                temperature=0.7,  # Control randomness
-                top_k=50,        # Limit vocabulary
-                top_p=0.95,      # Nucleus sampling
-                pad_token_id=self.tokenizer.eos_token_id,
-                no_repeat_ngram_size=3  # Prevent repetitive patterns
-            )
+            generated_text = response.json()['response']
+            print(f"Raw AI response: {generated_text}")  # Debugging
 
-            # Decode and format the output
-            generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            return self._format_output(generated_text, steps)
+            # Ensure we have valid response before returning
+            if not any(inst in generated_text for inst in ['Stopa:', 'Werbel:', 'Talerz:', 'TomTom:']):
+                print("Invalid response from AI, using default pattern")
+                return self.get_default_pattern(steps)
 
-        except Exception as e:
-            raise RuntimeError(f"Pattern generation failed: {str(e)}")
+            return generated_text
 
-    def _create_prompt(self, genre, steps):
-        """Create a detailed prompt for pattern generation."""
-        return (
-            f"Generate a {steps}-step drum pattern for {genre} music.\n"
-            f"Format: Each line should be 'Instrument: [pattern]' where pattern is {steps} numbers (0 or 1) separated by spaces.\n"
-            f"Include patterns for:\n"
-            f"- Stopa (kick drum)\n"
-            f"- Werbel (snare)\n"
-            f"- Talerz (hi-hat/cymbal)\n"
-            f"- TomTom\n"
-            f"Make it musical and typical for {genre}."
-        )
+        except requests.exceptions.RequestException as e:
+            print(f"Error communicating with Ollama: {e}")
+            return self.get_default_pattern(steps)
 
-    def _format_output(self, text, steps):
-        """Clean and format the generated output."""
-        # Extract pattern lines using regex
-        import re
-        pattern_lines = re.findall(r'(?:Stopa|Werbel|Talerz|TomTom):[\s0-1]+', text)
-
-        if not pattern_lines:
-            # If no valid patterns found, create default patterns
-            return self._create_default_patterns(steps)
-
-        return "\n".join(pattern_lines)
-
-    def _create_default_patterns(self, steps):
-        """Create basic default patterns if generation fails."""
-        return (
-            f"Stopa: {' '.join(['1' if i % 4 == 0 else '0' for i in range(steps)])}\n"
-            f"Werbel: {' '.join(['1' if i % 4 == 2 else '0' for i in range(steps)])}\n"
-            f"Talerz: {' '.join(['1' if i % 2 == 0 else '0' for i in range(steps)])}\n"
-            f"TomTom: {' '.join(['0'] * steps)}"
-        )
-
+    def get_default_pattern(self, steps):
+        return f"""Stopa: {' '.join(['1', '0'] * (steps // 2))}
+Werbel: {' '.join(['0', '1'] * (steps // 2))}
+Talerz: {' '.join(['1', '1', '0', '0'] * (steps // 4))}
+TomTom: {' '.join(['0', '0', '1', '1'] * (steps // 4))}"""
 
 win = DrumSamplerApp()
 win.connect("destroy", Gtk.main_quit)
