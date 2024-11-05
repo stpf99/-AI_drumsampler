@@ -123,6 +123,28 @@ class DrumSamplerApp(Gtk.Window):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
+
+    def autofill_pattern(self):
+        pattern_length = int(self.length_spinbutton.get_value())
+
+        for instrument, steps in self.patterns.items():
+            active_steps = [i for i, step in enumerate(steps) if step == 1]
+
+            # Dodaj dodatkowe aktywne kroki na podstawie istniejących
+            for i in range(pattern_length):
+                if i not in active_steps:
+                    # Jeśli krok jest pusty, sprawdź sąsiadujące kroki
+                    neighbors = [
+                        steps[(i - 1) % pattern_length],
+                        steps[(i + 1) % pattern_length]
+                    ]
+                    # Jeśli przynajmniej jeden z sąsiadów jest aktywny, aktywuj krok
+                    if sum(neighbors) > 0:
+                        steps[i] = 1 if random.random() < 0.5 else 0  # Aktywuj z 50% szansą
+
+        self.update_buttons()
+
+
     def create_pattern_controls(self):
         # Main horizontal box for all controls
         genre_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -387,18 +409,27 @@ class DrumSamplerApp(Gtk.Window):
         randomize_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.main_box.pack_start(randomize_box, False, False, 0)
 
+        # Etykieta informacyjna dla sekcji
         randomize_label = Gtk.Label(label="Instrument Randomization:")
         randomize_box.pack_start(randomize_label, False, False, 0)
 
+        # Pole do ustawienia prawdopodobieństwa randomizacji
         self.randomize_probability_adjustment = Gtk.Adjustment(value=10, lower=0, upper=100, step_increment=1)
         self.randomize_probability_spin = Gtk.SpinButton()
         self.randomize_probability_spin.set_adjustment(self.randomize_probability_adjustment)
         self.randomize_probability_spin.set_value(10)
         randomize_box.pack_start(self.randomize_probability_spin, False, False, 0)
 
+        # Przycisk do losowego uzupełniania instrumentów
         randomize_button = Gtk.Button(label="Randomize Instruments")
         randomize_button.connect("clicked", self.randomize_instruments)
         randomize_box.pack_start(randomize_button, False, False, 0)
+
+        # Nowy przycisk "Autofill" do automatycznego uzupełniania wzorca
+        autofill_button = Gtk.Button(label="Autofill")
+        autofill_button.connect("clicked", lambda widget: self.autofill_pattern())
+        randomize_box.pack_start(autofill_button, False, False, 0)
+
 
     def randomize_instruments(self, widget):
         probability = self.randomize_probability_spin.get_value() / 100
