@@ -123,25 +123,45 @@ class DrumSamplerApp(Gtk.Window):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-
     def create_pattern_controls(self):
+        # Main horizontal box for all controls
         genre_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.main_box.pack_start(genre_box, False, False, 0)
 
-        genre_label = Gtk.Label(label="Select Genre:")
-        genre_box.pack_start(genre_label, False, False, 0)
+        # Predefined genres dropdown section
+        preset_label = Gtk.Label(label="Preset Genre:")
+        genre_box.pack_start(preset_label, False, False, 0)
 
-        self.genre_entry = Gtk.ComboBoxText()
+        self.preset_genre_combo = Gtk.ComboBoxText()
         genres = ["House", "Techno", "Drum and Bass", "Ambient"]
         for genre in genres:
-            self.genre_entry.append_text(genre)
-        self.genre_entry.set_active(0)
-        genre_box.pack_start(self.genre_entry, False, False, 0)
+            self.preset_genre_combo.append_text(genre)
+        self.preset_genre_combo.set_active(0)
+        genre_box.pack_start(self.preset_genre_combo, False, False, 0)
 
-        # Dodanie przycisku "Auto FX Style"
+        # Auto FX Style button
         auto_fx_button = Gtk.Button(label="Auto FX Style")
         auto_fx_button.connect("clicked", self.apply_auto_fx_for_selected_style)
         genre_box.pack_start(auto_fx_button, False, False, 0)
+
+        # Add some spacing between the two sections
+        separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        genre_box.pack_start(separator, False, False, 10)
+
+        # Custom genre input section
+        custom_label = Gtk.Label(label="Custom Genre:")
+        genre_box.pack_start(custom_label, False, False, 0)
+
+        self.custom_genre_entry = Gtk.Entry()
+        genre_box.pack_start(self.custom_genre_entry, False, False, 0)
+
+        # Generate button
+        generate_button = Gtk.Button(label="Generate Pattern")
+        generate_button.connect("clicked", self.generate_ai_pattern)
+        genre_box.pack_start(generate_button, False, False, 0)
+
+        # Show all elements
+        genre_box.show_all()
 
     def setup_database(self):
         self.conn = sqlite3.connect("pattern_genres_logic.db")
@@ -310,7 +330,7 @@ class DrumSamplerApp(Gtk.Window):
     def perfect_tempo_bpm(self, widget):
         """Dostosowuje BPM do średniego tempa gatunku, po wcześniejszym wywołaniu funkcji matched_bpm."""
         self.matched_bpm(widget)  # Uruchomienie najpierw matched BPM
-        genre = self.genre_entry.get_active_text()
+        genre = self.custom_genre_entry.get_text()
         avg_bpm = self.genre_bpm.get(genre, self.base_bpm)
         self.absolute_bpm = int((self.absolute_bpm + avg_bpm) / 2)  # Średnia BPM po matched BPM
         self.bpm_entry.set_text(str(self.absolute_bpm))
@@ -653,7 +673,7 @@ class DrumSamplerApp(Gtk.Window):
                     self.effect_sliders[instrument][effect].set_value(value)  # Update the slider i
 
     def apply_auto_fx_for_selected_style(self, widget):
-        selected_style = self.genre_entry.get_active_text()
+        selected_style = self.preset_genre_combo.get_active_text()
         if selected_style:
             # Apply effect settings for the selected style
             self.apply_auto_fx_for_style(selected_style)
@@ -1152,7 +1172,7 @@ class DrumSamplerApp(Gtk.Window):
         self.update_buttons()
 
     def generate_ai_pattern(self, widget):
-        genre = self.genre_entry.get_text()
+        genre = self.custom_genre_entry.get_text()
 
         # Check database for existing pattern
         self.cursor.execute("SELECT logic FROM patterns WHERE genre=?", (genre,))
