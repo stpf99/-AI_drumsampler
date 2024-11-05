@@ -84,7 +84,6 @@ class DrumSamplerApp(Gtk.Window):
         self.add_css()
 
         # Add controls
-        self.create_pattern_controls()
         self.create_bpm_controls()
         self.create_matched_bpm_control()
         self.create_pattern_controls()
