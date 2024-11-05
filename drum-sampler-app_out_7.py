@@ -88,13 +88,14 @@ class DrumSamplerApp(Gtk.Window):
         # Add controls
         self.create_bpm_controls()
         self.create_matched_bpm_control()
+        self.create_dynamic_bpm_control()
         self.create_pattern_controls()
         self.create_pattern_length_control()
         self.create_instrument_randomization_controls()
-        self.create_dynamic_bpm_control()
         self.create_preset_selection()
-        self.create_effect_controls()
         self.create_autolevel_button()
+        self.create_effect_controls()
+
 
     def add_css(self):
         css_provider = Gtk.CssProvider()
@@ -151,7 +152,7 @@ class DrumSamplerApp(Gtk.Window):
         self.main_box.pack_start(genre_box, False, False, 0)
 
         # Predefined genres dropdown section
-        preset_label = Gtk.Label(label="Preset Genre:")
+        preset_label = Gtk.Label(label="FX Genre:")
         genre_box.pack_start(preset_label, False, False, 0)
 
         self.preset_genre_combo = Gtk.ComboBoxText()
@@ -203,7 +204,7 @@ class DrumSamplerApp(Gtk.Window):
         preset_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.main_box.pack_start(preset_box, False, False, 0)
 
-        preset_label = Gtk.Label(label="Techno Preset:")
+        preset_label = Gtk.Label(label="Genre Preset:")
         preset_box.pack_start(preset_label, False, False, 0)
 
         self.preset_combo = Gtk.ComboBoxText()
