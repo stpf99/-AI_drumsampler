@@ -8,6 +8,7 @@ import os
 from midiutil import MIDIFile
 import statistics
 from pydub import AudioSegment
+from pydub.utils import mediainfo
 from pydub.effects import compress_dynamic_range, low_pass_filter, high_pass_filter
 import io
 import numpy as np
@@ -48,7 +49,7 @@ class DrumSamplerApp(Gtk.Window):
         self.samples = {}
         self.buttons = {}
         # Inside the __init__ method of DrumSamplerApp
-        self.effects = {inst: {'volume': 0, 'pitch': 0, 'echo': 0, 'reverb': 0, 'distortion': 0, 'pan': 0} for inst in self.instruments}
+        self.effects = {inst: {'volume': 0, 'pitch': 0, 'echo': 0, 'reverb': 0, 'pan': 0} for inst in self.instruments}
 
 
         # MIDI note mapping for instruments
@@ -80,6 +81,7 @@ class DrumSamplerApp(Gtk.Window):
         self.current_bpm_index = 0
         self.steps_per_bpm = 4  # Liczba kroków przed zmianą BPM
 
+        self.effect_sliders = {}  # Dictionary to store volume sliders
         # Add CSS for circular buttons
         self.add_css()
 
@@ -92,7 +94,7 @@ class DrumSamplerApp(Gtk.Window):
         self.create_dynamic_bpm_control()
         self.create_preset_selection()
         self.create_effect_controls()
-
+        self.create_autolevel_button()
 
     def add_css(self):
         css_provider = Gtk.CssProvider()
@@ -136,6 +138,10 @@ class DrumSamplerApp(Gtk.Window):
         self.genre_entry.set_active(0)
         genre_box.pack_start(self.genre_entry, False, False, 0)
 
+        # Dodanie przycisku "Auto FX Style"
+        auto_fx_button = Gtk.Button(label="Auto FX Style")
+        auto_fx_button.connect("clicked", self.apply_auto_fx_for_selected_style)
+        genre_box.pack_start(auto_fx_button, False, False, 0)
 
     def setup_database(self):
         self.conn = sqlite3.connect("pattern_genres_logic.db")
@@ -224,6 +230,7 @@ class DrumSamplerApp(Gtk.Window):
         toolbar = Gtk.Toolbar()
         self.main_box.pack_start(toolbar, False, False, 0)
 
+        # Informacje o przyciskach i ich funkcjach
         button_info = [
             ("media-playback-start", self.play_pattern, "Play"),
             ("media-playback-stop", self.stop_pattern, "Stop"),
@@ -232,9 +239,10 @@ class DrumSamplerApp(Gtk.Window):
             ("document-save", self.save_project, "Save Project"),
             ("document-open", self.load_project, "Load Project"),
             ("document-export", self.export_to_midi, "Export MIDI"),
-            ("document-export", self.export_advanced_midi, "Export Advanced MIDI")  # New button
+            ("document-export", self.export_advanced_midi, "Export Advanced MIDI")
         ]
 
+        # Dodawanie przycisków na podstawie `button_info`
         for icon_name, callback, tooltip in button_info:
             button = Gtk.ToolButton()
             button.set_icon_name(icon_name)
@@ -242,24 +250,23 @@ class DrumSamplerApp(Gtk.Window):
             button.connect("clicked", callback)
             toolbar.insert(button, -1)
 
-
-
-        # Create audio backend selection dropdown
+        # Tworzenie menu wyboru backendu audio
         audio_backend_label = Gtk.Label(label="Audio Backend:")
-        toolbar.insert(Gtk.ToolItem(), -1)  # Spacer
+        toolbar.insert(Gtk.ToolItem(), -1)  # Wstawienie spacji przed menu
         audio_backend_item = Gtk.ToolItem()
         backend_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
 
         self.backend_combo = Gtk.ComboBoxText()
         self.backend_combo.append_text("PipeWire")
         self.backend_combo.append_text("JACK")
-        self.backend_combo.set_active(0)  # Default to PipeWire
+        self.backend_combo.set_active(0)  # Ustawienie PipeWire jako domyślnego
 
         backend_box.pack_start(audio_backend_label, False, False, 0)
         backend_box.pack_start(self.backend_combo, False, False, 0)
         audio_backend_item.add(backend_box)
         toolbar.insert(audio_backend_item, -1)
         toolbar.show_all()
+
 
     def create_bpm_controls(self):
         bpm_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -355,20 +362,6 @@ class DrumSamplerApp(Gtk.Window):
 
         # Call instrument randomization after generating the base pattern
         self.randomize_instruments(None)
-
-    def load_samples(self, widget):
-        for inst in self.instruments:
-            file_dialog = Gtk.FileChooserDialog(
-                title="Wybierz sample dla " + inst,
-                action=Gtk.FileChooserAction.OPEN,
-                buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK))
-
-            response = file_dialog.run()
-            if response == Gtk.ResponseType.OK:
-                filename = file_dialog.get_filename()
-                self.samples[inst] = filename
-                print(f"Wczytano sample {inst}: {filename}")
-            file_dialog.destroy()
 
     def create_instrument_randomization_controls(self):
         randomize_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -559,30 +552,26 @@ class DrumSamplerApp(Gtk.Window):
     def create_effect_controls(self):
         effect_frame = Gtk.Frame(label="Audio Effects")
         self.main_box.pack_start(effect_frame, False, False, 0)
-
         effect_grid = Gtk.Grid()
         effect_frame.add(effect_grid)
 
-        instruments = ['Talerz', 'Stopa', 'Werbel', 'TomTom']
-        effects = ['Volume', 'Pitch', 'Echo', 'Reverb', 'Distortion', 'Pan']
-
-        # Add column labels
+        effects = ['Volume', 'Pitch', 'Echo', 'Reverb', 'Pan']
         for col, effect in enumerate(effects, start=1):
             label = Gtk.Label(label=effect)
             effect_grid.attach(label, col, 0, 1, 1)
 
-        # Add row labels and sliders
-        for row, instrument in enumerate(instruments, start=1):
+        for row, instrument in enumerate(self.instruments, start=1):
             label = Gtk.Label(label=instrument)
             effect_grid.attach(label, 0, row, 1, 1)
+            self.effect_sliders[instrument] = {}  # Initialize sliders for each instrument
 
             for col, effect in enumerate(effects, start=1):
-                adjustment = Gtk.Adjustment(value=0, lower=-100, upper=100, step_increment=0.1, page_increment=1, page_size=0)
+                adjustment = Gtk.Adjustment(value=0, lower=-2, upper=2, step_increment=0.1)
                 slider = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=adjustment)
-                slider.set_digits(1)  # Allow more precision
-                slider.set_size_request(200, 35)  # Make the slider wider
+                slider.set_digits(1)
                 slider.connect('value-changed', self.on_effect_changed, instrument, effect.lower())
                 effect_grid.attach(slider, col, row, 1, 1)
+
 
                 # Create and attach reset button for each effect
                 reset_button = Gtk.Button(label="Reset")
@@ -590,10 +579,93 @@ class DrumSamplerApp(Gtk.Window):
                 reset_button.connect('clicked', self.reset_effect, slider, instrument, effect.lower())
                 effect_grid.attach(reset_button, col + len(effects), row, 1, 1)  # Place the reset button next to the slider
 
+                # Store volume sliders for Auto Level updates
+                if effect.lower() == 'volume':
+                    self.effect_sliders[instrument]['volume'] = slider
+
+    def create_autolevel_button(self):
+        autolevel_button = Gtk.Button(label="Auto Level")
+        autolevel_button.connect("clicked", self.autolevel_samples)
+        self.main_box.pack_start(autolevel_button, False, False, 0)
+
+    def load_samples(self, widget):
+        for inst in self.instruments:
+            file_dialog = Gtk.FileChooserDialog(
+                title=f"Wybierz sample dla {inst}",
+                action=Gtk.FileChooserAction.OPEN,
+                buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
+            )
+            response = file_dialog.run()
+            if response == Gtk.ResponseType.OK:
+                filename = file_dialog.get_filename()
+                self.samples[inst] = filename
+                print(f"Loaded sample for {inst}: {filename}")
+            file_dialog.destroy()
+        self.analyze_sample_volume()
+
+    def analyze_sample_volume(self):
+        total_volume = 0
+        sample_count = 0
+
+        for instrument, sample_path in self.samples.items():
+            if sample_path:
+                audio = AudioSegment.from_file(sample_path)
+                volume = audio.dBFS  # Get volume in dBFS
+                print(f"{instrument} volume: {volume} dBFS")
+                total_volume += volume
+                sample_count += 1
+
+        avg_volume = total_volume / sample_count if sample_count > 0 else 0
+        print(f"Average sample volume: {avg_volume} dBFS")
+        return avg_volume
+
+    def autolevel_samples(self, widget):
+        avg_volume = self.analyze_sample_volume()
+
+        for instrument in self.effects:
+            # Calculate volume in range -2 to 2
+            normalized_volume = max(min((self.effects[instrument]['volume'] - avg_volume) / 16, 2), -2)
+            self.effects[instrument]['volume'] = normalized_volume
+            print(f"Adjusted volume for {instrument} to balance levels at {normalized_volume}")
+
+            # Update the slider to reflect the new volume
+            if instrument in self.effect_sliders and 'volume' in self.effect_sliders[instrument]:
+                self.effect_sliders[instrument]['volume'].set_value(normalized_volume)
+
+    def on_effect_changed(self, slider, instrument, effect):
+        value = slider.get_value()
+        self.effects[instrument][effect] = value
+        print(f"Changed {effect} for {instrument} to {value}")
+
+    def apply_auto_fx_for_style(self, style):
+        fx_settings = {
+            "Techno": {'volume': 0.5, 'pitch': 0, 'echo': 1, 'reverb': 1, 'pan': 0},
+            "House": {'volume': 0.3, 'pitch': 0, 'echo': 0.5, 'reverb': 1, 'pan': 0.1},
+            "Drum and Bass": {'volume': 1.0, 'pitch': -1, 'echo': 1, 'reverb': 0.8, 'pan': -0.1},
+            "Ambient": {'volume': 0, 'pitch': 0, 'echo': 0.8, 'reverb': 1, 'pan': 0.2}
+        }
+        settings = fx_settings.get(style, {})
+        for instrument in self.instruments:
+            for effect, value in settings.items():
+                self.effects[instrument][effect] = value
+                print(f"{instrument} {effect} set to {value} for {style}")
+                if effect in self.effect_sliders[instrument]:
+                    self.effect_sliders[instrument][effect].set_value(value)  # Update the slider i
+
+    def apply_auto_fx_for_selected_style(self, widget):
+        selected_style = self.genre_entry.get_active_text()
+        if selected_style:
+            # Apply effect settings for the selected style
+            self.apply_auto_fx_for_style(selected_style)
+            print(f"Applied auto FX for style: {selected_style}")
+
     def reset_effect(self, button, slider, instrument, effect):
         slider.set_value(0)  # Reset the slider to 0
         self.effects[instrument][effect] = 0
         print(f"Reset {effect} for {instrument} to 0")
+        # Ensure the GUI slider is also updated
+        if effect in self.effect_sliders[instrument]:
+            self.effect_sliders[instrument][effect].set_value(0)  # Update the GUI slider
 
     def save_project(self, widget):
         dialog = Gtk.FileChooserDialog(
@@ -662,11 +734,6 @@ class DrumSamplerApp(Gtk.Window):
         # Apply reverb effect (simple reverb simulation)
         if effects['reverb'] > 0:
             audio_segment = audio_segment.fade_in(10).fade_out(300)
-
-        # Apply distortion (clipping the waveform)
-        if effects['distortion'] > 0:
-            factor = 1 + (effects['distortion'] / 100)
-            audio_segment = audio_segment.apply_gain(factor)
 
         # Apply pan effect
         if effects['pan'] != 0:
