@@ -114,194 +114,165 @@ class DrumSamplerApp(Gtk.Window):
         drummer_button = Gtk.Button(label="Add Drummer to Audio")
         drummer_button.connect("clicked", self.add_drummer_to_audio)
         self.main_box.pack_start(drummer_button, False, False, 0)
-
+    
     def add_drummer_to_audio(self, widget):
-        # Open audio file dialog with updated button handling
-        file_dialog = Gtk.FileChooserDialog(title="Select Audio File")
-        file_dialog.add_buttons(
-            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, 
-            Gtk.STOCK_OPEN, Gtk.ResponseType.OK
-        )
-        
-        # Progress dialog
-        progress_dialog = Gtk.Dialog(
-            title="Generating Percussion", 
-            transient_for=self, 
-            modal=True
-        )
+        file_dialog = Gtk.FileChooserDialog(title="Select Audio File", parent=self)
+        file_dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
+    
+        progress_dialog = Gtk.Dialog(title="Generating Percussion", transient_for=self, modal=True)
         progress_dialog.set_default_size(300, 100)
-        
+    
         progress_bar = Gtk.ProgressBar()
         progress_bar.set_show_text(True)
         progress_dialog.get_content_area().pack_start(progress_bar, True, True, 0)
         progress_dialog.show_all()
-        
+    
         def update_progress(fraction, message):
             GLib.idle_add(progress_bar.set_fraction, fraction)
             GLib.idle_add(progress_bar.set_text, message)
-        
+    
         def generate_drums_thread(audio_path):
             try:
-                # Update progress at different stages
                 update_progress(0.1, "Analyzing audio structure...")
-                
-                # Load audio with scalar tempo extraction
                 y, sr = librosa.load(audio_path, sr=22050)
-                
-                # Scalar tempo extraction
-                tempo = librosa.beat.beat_track(y=y, sr=sr)[0].item()
-                
+                tempo = librosa.beat.beat_track(y=y, sr=sr)[0]
+    
                 update_progress(0.3, "Detecting rhythmic patterns...")
-                
-                # More robust duration calculation
-                total_duration = librosa.get_duration(y=y, sr=sr)
-                bars = int(total_duration * (tempo / 60))
+                segments = librosa.effects.split(y, top_db=30)
+    
+                # **Minimalna zmiana**: Obsługa segmentów
+                if len(segments) < 2:
+                    raise ValueError("Not enough segments found for processing.")
                 
                 update_progress(0.5, "Generating percussion track...")
-                
-                # Generate percussion track
                 percussion_track, original_audio, sr = self.advanced_generate_drum_track(audio_path)
-                
+    
                 update_progress(0.7, "Synthesizing audio...")
-                
-                # Synthesize and save tracks
-                percussion_audio = self.synthesize_percussion_audio(
-                    percussion_track, 
-                    sr, 
-                    original_audio
-                )
-                
+                percussion_audio = self.synthesize_percussion_audio(percussion_track, sr, original_audio)
+    
                 update_progress(0.9, "Saving tracks...")
-                
-                # Save generated tracks
-                self.save_generated_tracks(
-                    audio_path, 
-                    percussion_track, 
-                    original_audio, 
-                    sr
-                )
-                
-                # Close progress dialog
+                self.save_generated_tracks(audio_path, percussion_track, original_audio, sr)
+    
                 GLib.idle_add(progress_dialog.destroy)
-                
-                # Show save confirmation
-                GLib.idle_add(self.show_save_confirmation, 
+                GLib.idle_add(self.show_save_confirmation,
                               audio_path.replace(".mp3", "_complementary_drums.wav"),
                               audio_path.replace(".mp3", "_combined.wav"))
-            
             except Exception as e:
-                # Error handling
                 GLib.idle_add(progress_dialog.destroy)
                 GLib.idle_add(self.show_error_dialog, str(e))
-        
-        def show_error_dialog(self, error_message):
-            error_dialog = Gtk.MessageDialog(
-                parent=self,
-                flags=Gtk.DialogFlags.MODAL,
-                type=Gtk.MessageType.ERROR,
-                buttons=Gtk.ButtonsType.OK,
-                text="Error Generating Percussion"
-            )
-            error_dialog.format_secondary_text(str(error_message))
-            error_dialog.run()
-            error_dialog.destroy()
-        
+    
         response = file_dialog.run()
         if response == Gtk.ResponseType.OK:
             audio_path = file_dialog.get_filename()
             file_dialog.destroy()
-            
-            # Start drum generation in a separate thread
-            threading.Thread(
-                target=generate_drums_thread, 
-                args=(audio_path,), 
-                daemon=True
-            ).start()
+            threading.Thread(target=generate_drums_thread, args=(audio_path,), daemon=True).start()
         else:
             file_dialog.destroy()
     
     def advanced_generate_drum_track(self, audio_path):
         y, sr = librosa.load(audio_path, sr=22050)
-        tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-        
-        steps_per_bar = 128
+        tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+        segments = librosa.effects.split(y, top_db=30)
+    
+        # **Minimalna zmiana**: Sprawdzenie i obsługa segmentów
+        if len(segments) < 2:
+            raise ValueError("Not enough segments for drum generation.")
+    
+        steps_per_beat = 8
         total_duration = librosa.get_duration(y=y, sr=sr)
         bars = int(total_duration * (tempo / 60))
-        total_steps = bars * steps_per_bar
-        
+        total_steps = bars * steps_per_beat
+    
         percussion_track = {inst: [0] * total_steps for inst in self.instruments}
-        
-        # Define a basic rhythmic grid to ensure consistent coverage
-        basic_rhythm_pattern = {
-            'Stopa': [1, 0, 0, 0, 1, 0, 0, 0],  # Basic kick drum pattern
-            'Werbel': [0, 0, 1, 0, 0, 0, 1, 0],  # Basic snare pattern
-            'Talerz': [1, 0, 1, 0, 1, 0, 1, 0],  # Consistent hi-hat/cymbal
-            'TomTom': [0, 0, 0, 0, 0, 0, 0, 1]   # Occasional tom fill
-        }
-        
-        # Fill the entire track with a base rhythmic pattern
-        for inst, pattern in basic_rhythm_pattern.items():
-            for step in range(total_steps):
-                # Repeat the basic pattern across the entire track
-                percussion_track[inst][step] = pattern[step % len(pattern)]
-        
-        # Analyze audio for more dynamic variation
-        onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-        onset_boundaries = librosa.onset.onset_detect(
-            y=y, 
-            sr=sr, 
-            units='time',
-            hop_length=512,
-            backtrack=True,
-            pre_max=15,
-            post_max=15,
-            delta=0.2,
-            wait=30
-        )
-        
-        # Add dynamic variation based on audio characteristics
-        for segment_idx in range(min(len(onset_boundaries), 8)):
-            start_time = onset_boundaries[segment_idx]
-            end_time = onset_boundaries[segment_idx + 1] if segment_idx + 1 < len(onset_boundaries) else total_duration
-            
-            segment_start_sample = int(start_time * sr)
-            segment_end_sample = int(end_time * sr)
-            segment_audio = y[segment_start_sample:segment_end_sample]
-            
-            local_energy = np.mean(np.abs(segment_audio))
-            local_zero_crossing_rate = np.mean(librosa.zero_crossings(segment_audio))
-            
-            # Dynamic intensity modifications
-            intensity_multiplier = 1 + (local_energy * 2)  # Boost based on local audio energy
-            
-            segment_start_step = int(total_steps * (segment_idx / len(onset_boundaries)))
-            segment_end_step = int(total_steps * ((segment_idx + 1) / len(onset_boundaries)))
-            
+    
+        # Obsługa segmentów przy generowaniu perkusji
+        for segment_idx, (start, end) in enumerate(zip(segments[:-1], segments[1:])):
+            segment_start_step = int(segment_idx * total_steps / len(segments))
+            segment_end_step = int((segment_idx + 1) * total_steps / len(segments))
+    
             for inst in self.instruments:
                 for step in range(segment_start_step, segment_end_step):
-                    # Add some randomness while maintaining base rhythm
-                    if random.random() < 0.3 * intensity_multiplier:
-                        percussion_track[inst][step] = 1
-                    
-                    # Occasional fills or variations
-                    if random.random() < 0.1:
-                        # Temporarily increase density of hits
-                        nearby_steps = range(max(0, step-4), min(total_steps, step+4))
-                        for nearby_step in nearby_steps:
-                            percussion_track[inst][nearby_step] = 1
+                    percussion_track[inst][step] = random.randint(0, 1)
+    
+        return percussion_track, y, sr
+    
+        def generate_segment_pattern(segment_index, total_segments):
+            # Progresywne zagęszczanie i zmiana charakteru w zależności od segmentu
+            base_patterns = {
+                'intro': {
+                    'Stopa': [1, 0, 0, 0, 0, 0, 0, 0],
+                    'Werbel': [0, 0, 0, 0, 1, 0, 0, 0],
+                    'Talerz': [0, 1, 0, 1, 0, 1, 0, 1],
+                    'TomTom': [0, 0, 0, 0, 0, 0, 0, 0]
+                },
+                'verse': {
+                    'Stopa': [1, 0, 0, 0, 1, 0, 0, 0],
+                    'Werbel': [0, 0, 1, 0, 0, 0, 1, 0],
+                    'Talerz': [1, 0, 1, 0, 1, 0, 1, 0],
+                    'TomTom': [0, 0, 0, 0, 0, 0, 0, 1]
+                },
+                'chorus': {
+                    'Stopa': [1, 0, 1, 0, 1, 0, 1, 0],
+                    'Werbel': [0, 1, 0, 1, 0, 1, 0, 1],
+                    'Talerz': [1, 1, 1, 1, 1, 1, 1, 1],
+                    'TomTom': [0, 0, 0, 1, 0, 0, 0, 1]
+                },
+                'outro': {
+                    'Stopa': [1, 1, 0, 0, 1, 1, 0, 0],
+                    'Werbel': [0, 0, 1, 1, 0, 0, 1, 1],
+                    'Talerz': [1, 0, 1, 0, 1, 0, 1, 0],
+                    'TomTom': [0, 0, 0, 1, 0, 0, 0, 1]
+                }
+            }
+            
+            # Określenie segmentu na podstawie jego pozycji
+            if segment_index == 0:
+                segment_type = 'intro'
+            elif segment_index < total_segments / 3:
+                segment_type = 'verse'
+            elif segment_index < 2 * total_segments / 3:
+                segment_type = 'chorus'
+            else:
+                segment_type = 'outro'
+            
+            return base_patterns[segment_type]
         
-        # Mood-based refinement
-        mood_analysis = self.detect_mood_and_modality(y, sr)
-        
-        if mood_analysis['mood'] == 'melancholic':
-            # Softer, sparser percussion
+        # Generowanie perkusji bazujące na strukturze
+        for segment_idx, (start, end) in enumerate(zip(segments[:-1], segments[1:])):
+            # Określenie zakresu kroków dla segmentu
+            segment_start_step = int(segment_idx * total_steps / len(segments))
+            segment_end_step = int((segment_idx + 1) * total_steps / len(segments))
+            
+            # Wzorzec dla danego segmentu
+            segment_pattern = generate_segment_pattern(segment_idx, len(segments))
+            
+            # Aplikacja wzorca
             for inst in self.instruments:
-                percussion_track[inst] = [x * 0.5 if random.random() < 0.3 else x for x in percussion_track[inst]]
+                for step in range(segment_start_step, segment_end_step):
+                    bar_position = (step - segment_start_step) % steps_per_beat
+                    percussion_track[inst][step] = segment_pattern[inst][bar_position]
+            
+            # Dodatkowe wzmocnienie na podstawie onsetów
+            for onset_frame in onset_frames:
+                if start <= onset_frame * hop_length <= end:
+                    onset_step = int(onset_frame * total_steps / len(y))
+                    for inst in ['Stopa', 'Werbel']:
+                        if onset_step < total_steps:
+                            percussion_track[inst][onset_step] = 1
         
-        elif mood_analysis['mood'] == 'energetic':
-            # More intense percussion
-            for inst in ['Stopa', 'Werbel']:
-                percussion_track[inst] = [1 if random.random() < 0.7 else x for x in percussion_track[inst]]
+        # Dostosowanie do nastroju
+        mood_intensity = {
+            'energetic': 1.2,
+            'melancholic': 0.7,
+            'dramatic': 1.0,
+            'calm': 0.5
+        }
+        
+        intensity = mood_intensity.get(mood_analysis['mood'], 1.0)
+        for inst in self.instruments:
+            percussion_track[inst] = [
+                min(1, int(x * intensity)) for x in percussion_track[inst]
+            ]
         
         return percussion_track, y, sr
 
