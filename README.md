@@ -2,7 +2,7 @@ drum pattern sample autogeneration with autogenartion midi songs //export basic 
 
 "comaptybile to Python 3.12v"
 
-v4 AI drum-sampler-app_out_7.py
+v8 AI drum-sampler-app_out_7.py
 <img width="964" alt="drums-v8" src="https://github.com/stpf99/-AI_drumsampler/blob/dc18306c48600831b18c4911a362a83d0cfec852/V9.png">
 
 Audio Analyzer Widget for whats now playing in Desktop
