@@ -297,6 +297,7 @@ class DrumSamplerApp(Gtk.Window):
         self.intensity_spin = Gtk.SpinButton()
         self.intensity_spin.set_adjustment(Gtk.Adjustment(value=0.5, lower=0, upper=1, step_increment=0.1))
         self.intensity_spin.set_numeric(True)
+        self.intensity_spin.set_digits(1)
         genre_box.pack_start(self.intensity_spin, False, False, 0)
     
         generate_button = Gtk.Button(label="Generate Pattern")
@@ -754,8 +755,19 @@ class DrumSamplerApp(Gtk.Window):
                 for i in range(pattern_length):
                     if random.random() < intensity * 0.2:
                         self._apply_step(inst, i, genre, complex=True)
+                        
+        for inst in self.instruments:
+            for i in range(pattern_length):
+                if inst == 'Stopa':
+                    self.patterns[inst][i] = 1 if i % 4 == 0 and random.random() < intensity else 0
+                elif inst == 'Werbel':
+                    self.patterns[inst][i] = 1 if i % 4 == 2 else 0
+                elif inst == 'Talerz':
+                    self.patterns[inst][i] = random.choice([0, 1]) if self.patterns['Stopa'][i] == 0 else 0
+                elif inst == 'TomTom':
+                    self.patterns[inst][i] = random.choice([0, 1]) if i % 8 == 7 else 0
     
-        self.update_buttons()
+                self.update_buttons()
 
     def _apply_step(self, inst, step, genre, complex=False):
         genre_rules = {
