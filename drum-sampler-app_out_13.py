@@ -573,7 +573,7 @@ class DrumSamplerApp(Gtk.Window):
     def on_button_toggled(self, button, instrument, step):
         if self.advanced_sequencer_mode:
             is_active = button.get_active()
-            step_data = self.patterns[instrument.Board][step]
+            step_data = self.patterns[instrument][step]
             step_data['active'] = is_active
             if is_active and step_data['rhythm_type'] == 'single':
                 step_data['rhythm_type'] = 'single'
@@ -759,25 +759,25 @@ class DrumSamplerApp(Gtk.Window):
                 step_interval = pattern_length // occurrences
                 for i in range(0, pattern_length, step_interval):
                     if random.random() < intensity:
-                        self.patterns[inst][i]['active'] = True
+                        self.patterns = {inst: [{ 'active': False } for _ in range(num_steps)] for inst in instruments}
                         self.patterns[inst][i]['rhythm_type'] = random.choice(rules[inst])
         elif progression == "Dense":
             for inst in self.instruments:
                 for i in range(pattern_length):
                     if random.random() < intensity * 0.8:
-                        self.patterns[inst][i]['active'] = True
+                        self.patterns = {inst: [{ 'active': False } for _ in range(num_steps)] for inst in instruments}
                         self.patterns[inst][i]['rhythm_type'] = random.choice(rules[inst])
         elif progression == "Sparse":
             for inst in self.instruments:
                 for i in range(pattern_length):
                     if random.random() < intensity * 0.3:
-                        self.patterns[inst][i]['active'] = True
+                        self.patterns = {inst: [{ 'active': False } for _ in range(num_steps)] for inst in instruments}
                         self.patterns[inst][i]['rhythm_type'] = random.choice(rules[inst])
         elif progression == "Random":
             for inst in self.instruments:
                 for i in range(pattern_length):
                     if random.random() < intensity:
-                        self.patterns[inst][i]['active'] = True
+                        self.patterns = {inst: [{ 'active': False } for _ in range(num_steps)] for inst in instruments}
                         self.patterns[inst][i]['rhythm_type'] = random.choice(rules[inst])
         
         if mod == "Simplify":
@@ -793,7 +793,7 @@ class DrumSamplerApp(Gtk.Window):
             for inst in self.instruments:
                 for i in range(pattern_length):
                     if random.random() < intensity * 0.2:
-                        self.patterns[inst][i]['active'] = True
+                        self.patterns = {inst: [{ 'active': False } for _ in range(num_steps)] for inst in instruments}
                         self.patterns[inst][i]['rhythm_type'] = random.choice(rules[inst])
         
         self.update_buttons()
@@ -1122,69 +1122,17 @@ class DrumSamplerApp(Gtk.Window):
         effect_sound.play(maxtime=500)
         return sound
 
-    def add_drummer_to_audio(self, widget):
-        file_dialog = Gtk.FileChooserDialog(title="Select Audio File", parent=self)
-        file_dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
-
-        progress_dialog = Gtk.Dialog(title="Generating Percussion", transient_for=self, modal=True)
-        progress_dialog.set_default_size(300, 100)
-
-        progress_bar = Gtk.ProgressBar()
-        progress_bar.set_show_text(True)
-        progress_dialog.get_content_area().pack_start(progress_bar, True, True, 0)
-        progress_dialog.show_all()
-
-        def update_progress(fraction, message):
-            GLib.idle_add(progress_bar.set_fraction, fraction)
-            GLib.idle_add(progress_bar.set_text, message)
-
-        def generate_drums_thread(audio_path):
-            try:
-                update_progress(0.1, "Analyzing audio structure...")
-                y, sr = librosa.load(audio_path, sr=22050)
-                tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-
-                update_progress(0.3, "Detecting rhythmic patterns...")
-                segments = librosa.effects.split(y, top_db=30)
-                if len(segments) < 2:
-                    raise ValueError("Not enough segments found for processing.")
-
-                update_progress(0.5, "Generating percussion track...")
-                percussion_track, original_audio, sr = self.advanced_generate_drum_track(audio_path, tempo, beat_frames)
-
-                update_progress(0.7, "Synthesizing audio...")
-                percussion_audio = self.synthesize_percussion_audio(percussion_track, sr, original_audio, tempo)
-
-                update_progress(0.9, "Saving tracks...")
-                self.save_generated_tracks(audio_path, percussion_track, original_audio, sr, tempo)
-
-                GLib.idle_add(progress_dialog.destroy)
-                GLib.idle_add(self.show_save_confirmation,
-                              audio_path.replace(".mp3", "_complementary_drums.wav"),
-                              audio_path.replace(".mp3", "_combined.wav"))
-            except Exception as e:
-                GLib.idle_add(progress_dialog.destroy)
-                GLib.idle_add(self.show_error_dialog, str(e))
-
-        response = file_dialog.run()
-        if response == Gtk.ResponseType.OK:
-            audio_path = file_dialog.get_filename()
-            file_dialog.destroy()
-            threading.Thread(target=generate_drums_thread, args=(audio_path,), daemon=True).start()
-        else:
-            file_dialog.destroy()
-
     def advanced_generate_drum_track(self, audio_path, tempo, beat_frames):
         y, sr = librosa.load(audio_path, sr=22050)
         total_duration = librosa.get_duration(y=y, sr=sr)
         
         steps_per_beat = 1
         beats_per_second = tempo / 60
-        total_steps = int(total_duration * beats_per_second * steps_per_beat)
+        total_steps = int(float(total_duration) * beats_per_second * steps_per_beat)
 
         percussion_track = {inst: [{'active': False, 'rhythm_type': 'single'} for _ in range(total_steps)] for inst in self.instruments}
 
-        beat_steps = [int(frame * steps_per_beat * beats_per_second * sr / 22050) for frame in beat_frames]
+        beat_steps = [int(float(frame) * steps_per_beat * beats_per_second * sr / 22050) for frame in beat_frames]
 
         for i in range(total_steps):
             if i in beat_steps:
@@ -1201,63 +1149,156 @@ class DrumSamplerApp(Gtk.Window):
 
         return percussion_track, y, sr
 
-    def synthesize_percussion_audio(self, percussion_track, sr, original_audio, tempo):
+    def add_drummer_to_audio(self, widget):
+        file_dialog = Gtk.FileChooserDialog(title="Select Audio File", parent=self)
+        file_dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
+    
+        progress_dialog = Gtk.Dialog(title="Enhancing Percussion", transient_for=self, modal=True)
+        progress_dialog.set_default_size(300, 100)
+        progress_bar = Gtk.ProgressBar()
+        progress_bar.set_show_text(True)
+        progress_dialog.get_content_area().pack_start(progress_bar, True, True, 0)
+        progress_dialog.show_all()
+    
+        def update_progress(fraction, message):
+            GLib.idle_add(progress_bar.set_fraction, fraction)
+            GLib.idle_add(progress_bar.set_text, message)
+    
+        def enhance_drums_thread(audio_path):
+            try:
+                update_progress(0.1, "Loading and analyzing audio...")
+                y, sr = librosa.load(audio_path, sr=22050)
+                tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+    
+                update_progress(0.3, "Detecting existing percussion...")
+                percussion_events = self.detect_existing_percussion(y, sr, beat_frames)
+    
+                update_progress(0.5, "Enhancing percussion track...")
+                percussion_track = self.enhance_percussion_track(percussion_events, tempo, len(y) / sr)
+    
+                update_progress(0.7, "Synthesizing enhanced audio...")
+                percussion_audio = self.synthesize_enhanced_audio(percussion_track, sr, y, tempo)
+    
+                update_progress(0.9, "Saving tracks...")
+                self.save_generated_tracks(audio_path, percussion_track, y, sr, percussion_audio)
+    
+                GLib.idle_add(progress_dialog.destroy)
+                GLib.idle_add(self.show_save_confirmation,
+                              audio_path.replace(".mp3", "_enhanced_drums.wav"),
+                              audio_path.replace(".mp3", "_combined.wav"))
+            except Exception as e:
+                GLib.idle_add(progress_dialog.destroy)
+                GLib.idle_add(self.show_error_dialog, str(e))
+    
+        response = file_dialog.run()
+        if response == Gtk.ResponseType.OK:
+            audio_path = file_dialog.get_filename()
+            file_dialog.destroy()
+            threading.Thread(target=enhance_drums_thread, args=(audio_path,), daemon=True).start()
+        else:
+            file_dialog.destroy()
+    
+    def detect_existing_percussion(self, y, sr, beat_frames):
+        """Wykrywa istniejące elementy perkusyjne w audio."""
+        # Analiza transjentów (onsets) dla perkusji
+        onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+        onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+        onset_times = librosa.frames_to_time(onsets, sr=sr)
+    
+        # Klasyfikacja transjentów na podstawie częstotliwości (prosta heurystyka)
+        percussion_events = {'Stopa': [], 'Werbel': [], 'Talerz': [], 'TomTom': []}
+        for onset_time in onset_times:
+            # Wyodrębnij fragment audio wokół transjentu
+            start_sample = int(max(0, onset_time * sr - 0.05 * sr))
+            end_sample = int(min(len(y), onset_time * sr + 0.05 * sr))
+            segment = y[start_sample:end_sample]
+            freqs = np.abs(librosa.stft(segment))
+            mean_freq = np.mean(np.argmax(freqs, axis=0))
+    
+            # Heurystyczne przypisanie instrumentów
+            if mean_freq < 100:  # Niskie częstotliwości -> Stopa
+                percussion_events['Stopa'].append(onset_time)
+            elif 100 <= mean_freq < 500:  # Średnie -> Werbel lub TomTom
+                percussion_events['Werbel'].append(onset_time) if random.random() < 0.7 else percussion_events['TomTom'].append(onset_time)
+            else:  # Wysokie -> Talerz
+                percussion_events['Talerz'].append(onset_time)
+    
+        return percussion_events
+    
+    def enhance_percussion_track(self, percussion_events, tempo, total_duration):
+        """Wzbogaca istniejącą perkusję o dodatkowe elementy."""
+        beats_per_second = tempo / 60
+        steps_per_beat = 4
+        total_steps = int(total_duration * beats_per_second * steps_per_beat)
+        percussion_track = {inst: [{'active': False, 'rhythm_type': 'single'} for _ in range(total_steps)] for inst in self.instruments}
+    
+        # Mapuj istniejące zdarzenia na kroki
+        for inst, times in percussion_events.items():
+            for t in times:
+                step = int(t * beats_per_second * steps_per_beat)
+                if step < total_steps:
+                    percussion_track[inst][step]['active'] = True
+                    percussion_track[inst][step]['rhythm_type'] = 'single'
+    
+        # Wzbogać rytm w zależności od stylu
+        style = self.preset_genre_combo.get_active_text() or "Techno"
+        for step in range(total_steps):
+            if random.random() < 0.1:  # Dodaj subtelne wypełniacze
+                if style == "Techno" and step % 8 == 7 and not percussion_track['TomTom'][step]['active']:
+                    percussion_track['TomTom'][step] = {'active': True, 'rhythm_type': 'accent'}
+                elif style == "House" and step % 4 == 3 and not percussion_track['Talerz'][step]['active']:
+                    percussion_track['Talerz'][step] = {'active': True, 'rhythm_type': 'swing'}
+    
+        return percussion_track
+    
+    def synthesize_enhanced_audio(self, percussion_track, sr, original_audio, tempo):
+        """Syntetyzuje wzbogaconą perkusję z opcjonalnymi efektami."""
         beats_per_second = tempo / 60
         steps_per_beat = 4
         step_duration = int(sr / (beats_per_second * steps_per_beat))
         total_length = len(percussion_track['Stopa'])
-
         audio = np.zeros(total_length * step_duration, dtype=np.float32)
-
+    
         for inst in self.instruments:
             for step in range(total_length):
                 step_data = percussion_track[inst][step]
                 if step_data['active']:
                     rhythm = self.rhythm_types[step_data['rhythm_type']]
-                    try:
-                        sample = pygame.mixer.Sound(self.samples[inst])
-                        sample_array = pygame.sndarray.array(sample)
-                        if sample_array.ndim > 1:
-                            sample_array = sample_array.mean(axis=1)
-                        note_duration = step_duration * rhythm['speed'] / rhythm['notes']
-                        for i in range(rhythm['notes']):
-                            if len(sample_array) > note_duration:
-                                sample_array = sample_array[:note_duration]
-                            elif len(sample_array) < note_duration:
-                                sample_array = np.pad(sample_array, (0, max(0, note_duration - len(sample_array))))
-                            start = step * step_duration + i * note_duration
-                            end = start + note_duration
-                            if end <= len(audio):
-                                audio[start:end] += sample_array
-                    except Exception as e:
-                        print(f"Error processing {inst} sample: {e}")
-
+                    sample = pygame.mixer.Sound(self.samples[inst])
+                    sample_array = pygame.sndarray.array(sample)
+                    if sample_array.ndim > 1:
+                        sample_array = sample_array.mean(axis=1)
+                    note_duration = int(step_duration * rhythm['speed'] / rhythm['notes'])
+                    for i in range(rhythm['notes']):
+                        start = int(step * step_duration + i * note_duration)
+                        end = int(start + note_duration)
+                        if len(sample_array) > note_duration:
+                            sample_array_adj = sample_array[:note_duration]
+                        else:
+                            sample_array_adj = np.pad(sample_array, (0, note_duration - len(sample_array)))
+                        if end <= len(audio):
+                            audio[start:end] += sample_array_adj * 0.7  # Skaluj głośność
+    
+        # Normalizacja i balans z oryginalnym audio
         original_rms = np.sqrt(np.mean(original_audio**2))
         percussion_rms = np.sqrt(np.mean(audio**2))
         if percussion_rms > 0:
-            scaling_factor = original_rms / percussion_rms
-            audio *= scaling_factor
-
-        max_val = np.max(np.abs(audio))
-        if max_val > 0:
-            audio /= max_val
-
+            audio *= (original_rms / percussion_rms) * 0.5  # 50% głośności perkusji względem oryginału
+    
         return audio
-
-    def save_generated_tracks(self, audio_path, percussion_track, original_audio, sr, tempo):
-        percussion_audio = self.synthesize_percussion_audio(percussion_track, sr, original_audio, tempo)
+    
+    def save_generated_tracks(self, audio_path, percussion_track, original_audio, sr, percussion_audio):
+        """Zapisuje wzbogacone ścieżki."""
         max_length = len(original_audio)
         percussion_audio = librosa.util.fix_length(percussion_audio, size=max_length)
-        combined_audio = (original_audio * 0.4 + percussion_audio * 0.5)
+        combined_audio = original_audio * 0.6 + percussion_audio * 0.4  # Subtelniejszy miks
         combined_audio = librosa.util.normalize(combined_audio)
-
-        percussion_path = audio_path.replace(".mp3", "_complementary_drums.wav")
+    
+        percussion_path = audio_path.replace(".mp3", "_enhanced_drums.wav")
         combined_path = audio_path.replace(".mp3", "_combined.wav")
-
         sf.write(percussion_path, percussion_audio, sr)
         sf.write(combined_path, combined_audio, sr)
-
-        return percussion_path, combined_path
 
     def show_save_confirmation(self, percussion_path, combined_path):
         dialog = Gtk.MessageDialog(
