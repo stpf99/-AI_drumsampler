@@ -1174,7 +1174,8 @@ class DrumSamplerApp(Gtk.Window):
                 percussion_events = self.detect_existing_percussion(y, sr, beat_frames)
     
                 update_progress(0.5, "Enhancing percussion track...")
-                percussion_track = self.enhance_percussion_track(percussion_events, tempo, len(y) / sr)
+                # Przekazujemy audio_path bezpośrednio zamiast polegać na self.current_audio_path
+                percussion_track = self.enhance_percussion_track(percussion_events, tempo, len(y) / sr, audio_path, y, sr)
     
                 update_progress(0.7, "Synthesizing enhanced audio...")
                 percussion_audio = self.synthesize_enhanced_audio(percussion_track, sr, y, tempo)
@@ -1200,34 +1201,29 @@ class DrumSamplerApp(Gtk.Window):
     
     def detect_existing_percussion(self, y, sr, beat_frames):
         """Wykrywa istniejące elementy perkusyjne w audio."""
-        # Analiza transjentów (onsets) dla perkusji
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
         onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
-        beat_times = librosa.frames_to_time(beat_frames, sr=sr)
         onset_times = librosa.frames_to_time(onsets, sr=sr)
     
-        # Klasyfikacja transjentów na podstawie częstotliwości (prosta heurystyka)
         percussion_events = {'Stopa': [], 'Werbel': [], 'Talerz': [], 'TomTom': []}
         for onset_time in onset_times:
-            # Wyodrębnij fragment audio wokół transjentu
             start_sample = int(max(0, onset_time * sr - 0.05 * sr))
             end_sample = int(min(len(y), onset_time * sr + 0.05 * sr))
             segment = y[start_sample:end_sample]
             freqs = np.abs(librosa.stft(segment))
             mean_freq = np.mean(np.argmax(freqs, axis=0))
     
-            # Heurystyczne przypisanie instrumentów
-            if mean_freq < 100:  # Niskie częstotliwości -> Stopa
+            if mean_freq < 100:
                 percussion_events['Stopa'].append(onset_time)
-            elif 100 <= mean_freq < 500:  # Średnie -> Werbel lub TomTom
+            elif 100 <= mean_freq < 500:
                 percussion_events['Werbel'].append(onset_time) if random.random() < 0.7 else percussion_events['TomTom'].append(onset_time)
-            else:  # Wysokie -> Talerz
+            else:
                 percussion_events['Talerz'].append(onset_time)
     
         return percussion_events
     
-    def enhance_percussion_track(self, percussion_events, tempo, total_duration):
-        """Wzbogaca istniejącą perkusję o dodatkowe elementy."""
+    def enhance_percussion_track(self, percussion_events, tempo, total_duration, audio_path, y, sr):
+        """Wzbogaca perkusję z wykrywaniem complexity_factor i mniej gęstym rytmem."""
         beats_per_second = tempo / 60
         steps_per_beat = 4
         total_steps = int(total_duration * beats_per_second * steps_per_beat)
@@ -1241,19 +1237,64 @@ class DrumSamplerApp(Gtk.Window):
                     percussion_track[inst][step]['active'] = True
                     percussion_track[inst][step]['rhythm_type'] = 'single'
     
-        # Wzbogać rytm w zależności od stylu
+        # Analiza audio do wykrycia complexity_factor
+        if not audio_path or not os.path.exists(audio_path):
+            raise ValueError("Brak poprawnej ścieżki audio (audio_path)")
+    
+        beats_per_measure = 4
+        measures = total_steps // (beats_per_measure * steps_per_beat)
+        samples_per_measure = int(sr * beats_per_measure / beats_per_second)
+    
+        rms = librosa.feature.rms(y=y, frame_length=samples_per_measure, hop_length=samples_per_measure)
+        onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=samples_per_measure)
+        onset_density = [np.sum(onset_env[i:i+1]) for i in range(0, len(onset_env), 1)]
+    
+        rms_normalized = (rms[0] - np.min(rms)) / (np.max(rms) - np.min(rms) + 1e-6)
+        onset_normalized = [(d - min(onset_density)) / (max(onset_density) - min(onset_density) + 1e-6) for d in onset_density]
+    
         style = self.preset_genre_combo.get_active_text() or "Techno"
-        for step in range(total_steps):
-            if random.random() < 0.1:  # Dodaj subtelne wypełniacze
-                if style == "Techno" and step % 8 == 7 and not percussion_track['TomTom'][step]['active']:
-                    percussion_track['TomTom'][step] = {'active': True, 'rhythm_type': 'accent'}
-                elif style == "House" and step % 4 == 3 and not percussion_track['Talerz'][step]['active']:
-                    percussion_track['Talerz'][step] = {'active': True, 'rhythm_type': 'swing'}
+        for measure in range(measures):
+            measure_start = measure * beats_per_measure * steps_per_beat
+            measure_end = min((measure + 1) * beats_per_measure * steps_per_beat, total_steps)
+    
+            # Oblicz complexity_factor
+            rms_factor = rms_normalized[min(measure, len(rms_normalized) - 1)]
+            onset_factor = onset_normalized[min(measure, len(onset_normalized) - 1)]
+            complexity_factor = min(0.7, (rms_factor + onset_factor) / 2)
+    
+            # Stabilna podstawa rytmiczna z większymi odstępami
+            for step in range(measure_start, measure_end, steps_per_beat):  # Krok co beat, nie co step
+                beat_in_measure = (step % (beats_per_measure * steps_per_beat)) // steps_per_beat
+                if beat_in_measure == 0 and not percussion_track['Stopa'][step]['active']:
+                    percussion_track['Stopa'][step]['active'] = True
+                    percussion_track['Stopa'][step]['rhythm_type'] = 'single'
+                if beat_in_measure == 2 and not percussion_track['Werbel'][step]['active'] and random.random() < 0.5 * (1 + complexity_factor):
+                    percussion_track['Werbel'][step]['active'] = True
+                    percussion_track['Werbel'][step]['rhythm_type'] = 'single'
+    
+            # Subtelna ewolucja z mniejszą gęstością
+            if complexity_factor > 0.3:  # Dodajemy elementy tylko w bardziej intensywnych sekcjach
+                for step in range(measure_start, measure_end, steps_per_beat * 2):  # Co 2 beaty
+                    offbeat = step % (steps_per_beat * 2) != 0
+                    if style == "Techno":
+                        if measure % 4 == 0 and random.random() < complexity_factor * 0.08 and not percussion_track['Talerz'][step]['active']:
+                            percussion_track['Talerz'][step]['active'] = True
+                            percussion_track['Talerz'][step]['rhythm_type'] = 'double'
+                        if measure % 8 == 7 and random.random() < complexity_factor * 0.1 and not percussion_track['TomTom'][step]['active']:
+                            percussion_track['TomTom'][step]['active'] = True
+                            percussion_track['TomTom'][step]['rhythm_type'] = 'accent'
+                    elif style == "House":
+                        if measure % 4 == 2 and random.random() < complexity_factor * 0.08 and not percussion_track['Talerz'][step]['active']:
+                            percussion_track['Talerz'][step]['active'] = True
+                            percussion_track['Talerz'][step]['rhythm_type'] = 'swing'
+                        if measure % 8 == 4 and random.random() < complexity_factor * 0.05 and not percussion_track['Stopa'][step]['active']:
+                            percussion_track['Stopa'][step]['active'] = True
+                            percussion_track['Stopa'][step]['rhythm_type'] = 'single'
     
         return percussion_track
     
     def synthesize_enhanced_audio(self, percussion_track, sr, original_audio, tempo):
-        """Syntetyzuje wzbogaconą perkusję z opcjonalnymi efektami."""
+        """Syntetyzuje perkusję z dłuższym wybrzmieniem i mniejszą gęstością."""
         beats_per_second = tempo / 60
         steps_per_beat = 4
         step_duration = int(sr / (beats_per_second * steps_per_beat))
@@ -1269,22 +1310,25 @@ class DrumSamplerApp(Gtk.Window):
                     sample_array = pygame.sndarray.array(sample)
                     if sample_array.ndim > 1:
                         sample_array = sample_array.mean(axis=1)
-                    note_duration = int(step_duration * rhythm['speed'] / rhythm['notes'])
+                    
+                    # Dłuższe trwanie nuty, minimum połowa beatu
+                    note_duration = max(int(step_duration * 2 * rhythm['speed'] / rhythm['notes']), int(sr / beats_per_second / 2))
                     for i in range(rhythm['notes']):
                         start = int(step * step_duration + i * note_duration)
-                        end = int(start + note_duration)
+                        end = min(start + note_duration, len(audio))
                         if len(sample_array) > note_duration:
                             sample_array_adj = sample_array[:note_duration]
                         else:
                             sample_array_adj = np.pad(sample_array, (0, note_duration - len(sample_array)))
                         if end <= len(audio):
-                            audio[start:end] += sample_array_adj * 0.7  # Skaluj głośność
+                            audio[start:end] += sample_array_adj * 0.5
+                        else:
+                            audio[start:] += sample_array_adj[:len(audio) - start] * 0.5
     
-        # Normalizacja i balans z oryginalnym audio
         original_rms = np.sqrt(np.mean(original_audio**2))
         percussion_rms = np.sqrt(np.mean(audio**2))
         if percussion_rms > 0:
-            audio *= (original_rms / percussion_rms) * 0.5  # 50% głośności perkusji względem oryginału
+            audio *= (original_rms / percussion_rms) * 0.3
     
         return audio
     
@@ -1292,7 +1336,7 @@ class DrumSamplerApp(Gtk.Window):
         """Zapisuje wzbogacone ścieżki."""
         max_length = len(original_audio)
         percussion_audio = librosa.util.fix_length(percussion_audio, size=max_length)
-        combined_audio = original_audio * 0.6 + percussion_audio * 0.4  # Subtelniejszy miks
+        combined_audio = original_audio * 0.6 + percussion_audio * 0.4
         combined_audio = librosa.util.normalize(combined_audio)
     
         percussion_path = audio_path.replace(".mp3", "_enhanced_drums.wav")
