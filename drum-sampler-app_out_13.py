@@ -1138,7 +1138,7 @@ class DrumSamplerApp(Gtk.Window):
             if i in beat_steps:
                 percussion_track['Stopa'][i]['active'] = True
                 percussion_track['Stopa'][i]['rhythm_type'] = 'single'
-                percussion_track['Werbel'][i]['active'] = True if i % (steps_per_beat * 2) == steps_per_beat else False
+                percussion_track['Werbel'][i]['active'] = True if i % (steps_per_beat * 4) == steps_per_beat else False
                 percussion_track['Werbel'][i]['rhythm_type'] = 'swing'
             if random.random() < 0.3:
                 percussion_track['Talerz'][i]['active'] = True
@@ -1336,7 +1336,7 @@ class DrumSamplerApp(Gtk.Window):
         """Zapisuje wzbogacone ścieżki."""
         max_length = len(original_audio)
         percussion_audio = librosa.util.fix_length(percussion_audio, size=max_length)
-        combined_audio = original_audio * 0.6 + percussion_audio * 0.4
+        combined_audio = original_audio * 0.4 + percussion_audio * 0.5
         combined_audio = librosa.util.normalize(combined_audio)
     
         percussion_path = audio_path.replace(".mp3", "_enhanced_drums.wav")
